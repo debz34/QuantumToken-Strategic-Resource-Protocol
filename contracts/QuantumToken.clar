@@ -292,3 +292,57 @@
     )
   )
 )
+
+;; Originator control: Terminate active capsule
+(define-public (terminate-capsule (capsule-id uint))
+  (begin
+    (asserts! (is-valid-capsule-id capsule-id) ERR_INVALID_CAPSULE_REFERENCE)
+    (let
+      (
+        (capsule (unwrap! (map-get? QuantumCapsules { capsule-id: capsule-id }) ERR_CAPSULE_MISSING))
+        (originator (get originator capsule))
+        (quantum (get quantum capsule))
+        (fulfilled-count (get fulfilled-milestones capsule))
+        (remaining-quantum (- quantum (* (/ quantum (len (get milestones capsule))) fulfilled-count)))
+      )
+      (asserts! (is-eq tx-sender originator) ERR_PERMISSION_DENIED)
+      (asserts! (< block-height (get termination-block capsule)) ERR_CAPSULE_EXPIRED)
+      (asserts! (is-eq (get phase capsule) "active") ERR_RESOURCES_DEPLETED)
+      (match (stx-transfer? remaining-quantum (as-contract tx-sender) originator)
+        success
+          (begin
+            (map-set QuantumCapsules
+              { capsule-id: capsule-id }
+              (merge capsule { phase: "terminated" })
+            )
+            (ok true)
+          )
+        error ERR_TRANSACTION_REJECTED
+      )
+    )
+  )
+)
+
+;; Timeline adjustment: Extend capsule lifetime
+(define-public (extend-capsule-timeline (capsule-id uint) (extension-blocks uint))
+  (begin
+    (asserts! (is-valid-capsule-id capsule-id) ERR_INVALID_CAPSULE_REFERENCE)
+    (asserts! (<= extension-blocks MAX_TIMELINE_ADJUSTMENT) ERR_QUANTITY_UNACCEPTABLE)
+    (let
+      (
+        (capsule (unwrap! (map-get? QuantumCapsules { capsule-id: capsule-id }) ERR_CAPSULE_MISSING))
+        (originator (get originator capsule))
+        (current-termination (get termination-block capsule))
+      )
+      (asserts! (is-eq tx-sender originator) ERR_PERMISSION_DENIED)
+      (asserts! (< block-height current-termination) ERR_ALREADY_EXPIRED)
+      (map-set QuantumCapsules
+        { capsule-id: capsule-id }
+        (merge capsule { termination-block: (+ current-termination extension-blocks) })
+      )
+      (ok true)
+    )
+  )
+)
+
+
