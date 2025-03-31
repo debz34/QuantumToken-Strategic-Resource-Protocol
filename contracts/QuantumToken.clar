@@ -235,3 +235,60 @@
     )
   )
 )
+
+;; Milestone validation: Confirm milestone completion and distribute quantum
+(define-public (validate-milestone (capsule-id uint))
+  (begin
+    (asserts! (is-valid-capsule-id capsule-id) ERR_INVALID_CAPSULE_REFERENCE)
+    (let
+      (
+        (capsule (unwrap! (map-get? QuantumCapsules { capsule-id: capsule-id }) ERR_CAPSULE_MISSING))
+        (milestones (get milestones capsule))
+        (fulfilled-count (get fulfilled-milestones capsule))
+        (recipient (get recipient capsule))
+        (total-quantum (get quantum capsule))
+        (distribution-quantum (/ total-quantum (len milestones)))
+      )
+      (asserts! (< fulfilled-count (len milestones)) ERR_RESOURCES_DEPLETED)
+      (asserts! (is-eq tx-sender PROTOCOL_SUPERVISOR) ERR_PERMISSION_DENIED)
+      (match (stx-transfer? distribution-quantum (as-contract tx-sender) recipient)
+        success
+          (begin
+            (map-set QuantumCapsules
+              { capsule-id: capsule-id }
+              (merge capsule { fulfilled-milestones: (+ fulfilled-count u1) })
+            )
+            (ok true)
+          )
+        error ERR_TRANSACTION_REJECTED
+      )
+    )
+  )
+)
+
+;; Originator protection: Reclaim quantum on expiration
+(define-public (reclaim-quantum (capsule-id uint))
+  (begin
+    (asserts! (is-valid-capsule-id capsule-id) ERR_INVALID_CAPSULE_REFERENCE)
+    (let
+      (
+        (capsule (unwrap! (map-get? QuantumCapsules { capsule-id: capsule-id }) ERR_CAPSULE_MISSING))
+        (originator (get originator capsule))
+        (quantum (get quantum capsule))
+      )
+      (asserts! (is-eq tx-sender PROTOCOL_SUPERVISOR) ERR_PERMISSION_DENIED)
+      (asserts! (> block-height (get termination-block capsule)) ERR_CAPSULE_EXPIRED)
+      (match (stx-transfer? quantum (as-contract tx-sender) originator)
+        success
+          (begin
+            (map-set QuantumCapsules
+              { capsule-id: capsule-id }
+              (merge capsule { phase: "reclaimed" })
+            )
+            (ok true)
+          )
+        error ERR_TRANSACTION_REJECTED
+      )
+    )
+  )
+)
